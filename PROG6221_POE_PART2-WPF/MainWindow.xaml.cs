@@ -1,25 +1,26 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using PROG6221_POE_PART2_WPF;
+using System;
+using System.IO;
 using System.Media;
+using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.IO;
-using System.Threading.Tasks;
 
 namespace PROG6221_POE_PART2_WPF
 {
     /* ChatWindow is the main WPF window for Part 2 of the Cybersecurity Awareness Chat Bot.
      * It handles:
-     *   - Greeting flow (name input, welcome speech)
+     *   - Greeting flow: plays WAV, speaks "What is your name?", waits for typed name
+     *   - Name validation: rejects numeric-only input and blank entries
      *   - Rendering chat messages with colour-coded bubbles per sender type
      *   - Routing user input to Cyber_Quiz.GetResponse()
      *   - Voice toggle (text-to-speech on/off)
-     *   - Chat history clear
+     *   - Chat history clear and session reset
      *   - Exit / quit / thank-you flows
      *   - Live status bar and topic-history display
      *
@@ -31,24 +32,16 @@ namespace PROG6221_POE_PART2_WPF
      */
     public partial class ChatWindow : Window
     {
-        private delegate void BotSpeechDelegate(string text);
-        private delegate Task BotMessageRenderDelegate(string text);
-
         // ── State ─────────────────────────────────────────────────────────────────
-        private bool _nameEntered = false;   // True once the user has provided their name
-        private bool _voiceEnabled = true;    // Tracks text-to-speech toggle state
+        private bool _nameEntered = false;   // True once the user has provided a valid name
         private bool _isBotTyping = false;   // Prevents double-sends while bot is responding
-        private const int BaseTypingDelayMs = 18;
-        private readonly BotSpeechDelegate _speakBotDelegate;
-        private readonly BotMessageRenderDelegate _renderBotMessageDelegate;
 
-        // ── Colour constants (match XAML brushes) ─────────────────────────────────
-        private static readonly SolidColorBrush BotColour = new SolidColorBrush(Color.FromRgb(0, 229, 255)); // Cyan
-        private static readonly SolidColorBrush UserColour = new SolidColorBrush(Color.FromRgb(255, 214, 0)); // Yellow
-        private static readonly SolidColorBrush SystemColour = new SolidColorBrush(Color.FromRgb(0, 255, 65)); // Green
-        private static readonly SolidColorBrush ErrorColour = new SolidColorBrush(Color.FromRgb(255, 61, 61)); // Red
-        private static readonly SolidColorBrush MutedColour = new SolidColorBrush(Color.FromRgb(42, 90, 42)); // Muted green
-        private static readonly SolidColorBrush BackgroundColour = new SolidColorBrush(Color.FromRgb(13, 13, 13));
+        // ── Colour constants ──────────────────────────────────────────────────────
+        private static readonly SolidColorBrush BotColour = new SolidColorBrush(Color.FromRgb(0, 229, 255));
+        private static readonly SolidColorBrush UserColour = new SolidColorBrush(Color.FromRgb(255, 214, 0));
+        private static readonly SolidColorBrush SystemColour = new SolidColorBrush(Color.FromRgb(0, 255, 65));
+        private static readonly SolidColorBrush ErrorColour = new SolidColorBrush(Color.FromRgb(255, 61, 61));
+        private static readonly SolidColorBrush MutedColour = new SolidColorBrush(Color.FromRgb(42, 90, 42));
 
         // ══════════════════════════════════════════════════════════════════════════
         //  Initialisation
@@ -57,59 +50,62 @@ namespace PROG6221_POE_PART2_WPF
         public ChatWindow()
         {
             InitializeComponent();
-            _speakBotDelegate = Visuals_UI.SpeakAsync;
-            _renderBotMessageDelegate = AppendBotMessageWithTypingAsync;
             Loaded += ChatWindow_Loaded;
         }
 
         /* Runs after all XAML elements are initialised.
-         * Displays the ASCII banner, plays the greeting WAV (if present),
-         * then asks the user for their name.
+         * 1. Displays the ASCII banner.
+         * 2. Plays the greeting WAV on a background thread.
+         * 3. After the WAV finishes, speaks "What is your name?" via TTS.
+         * 4. Displays the typed greeting message in the chat panel.
+         *
+         * Fix applied: the "what is your name" prompt is now spoken AFTER the WAV
+         * greeting finishes, not simultaneously with it.
          */
-        private async void ChatWindow_Loaded(object sender, RoutedEventArgs e)
+        private void ChatWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            // Render ASCII banner
             TxtBanner.Text = Visuals_UI.GetASCIIBanner();
 
-            // Play greeting WAV on a background thread — non-blocking
-            string wavPath = "Greeting.wav";
-            if (File.Exists(wavPath))
+            // Show the initial bot message immediately in the chat
+            AppendBotMessage(
+                "HI THERE! IT'S YOUR CYBERSECURITY AWARENESS CHAT BOT.\n" +
+                "HERE TO HELP YOU STAY SAFE ONLINE!\n\n" +
+                "WHAT IS YOUR NAME?");
+
+            SetStatus("WAITING FOR USER NAME...");
+            TxtInput.Focus();
+
+            // Play WAV greeting, then speak the name prompt — all on a background thread
+            // so the UI never freezes. The name prompt fires only after the WAV finishes.
+            // Generated with assistance from Anthropic (2026) Claude [AI assistant].
+            // Prompt: 'How to play a wav file then run TTS sequentially on a background thread in WPF', April 2026.
+            Thread greetingThread = new Thread(() =>
             {
-                Thread audioThread = new Thread(() =>
+                // Step 1: Play WAV (blocks this background thread until done)
+                string wavPath = "Greeting.wav";
+                if (File.Exists(wavPath))
                 {
                     try
                     {
                         SoundPlayer player = new SoundPlayer(wavPath);
                         player.PlaySync();
                     }
-                    catch { /* Audio failure is non-critical */ }
-                });
-                audioThread.IsBackground = true;
-                audioThread.Start();
-            }
+                    catch (Exception) { /* Non-critical — continue */ }
+                }
 
-            // Show initial bot greeting in the chat panel
-            _isBotTyping = true;
-            BtnSend.IsEnabled = false;
-            string startupGreeting =
-                "HI THERE!, ITS YOUR CYBERSECURITY AWARENESS CHATBOT.\n" +
-                " HERE TO HELP YOU STAY SAFE ONLINE.\n" +
-                " NEED HELP WITH ANYTHING, JUST ASK AWAY.\n\n" +
-                "WHAT IS YOUR NAME?";
-            await RenderBotOutputAsync(startupGreeting, "What is your name?");
-            _isBotTyping = false;
-
-            SetStatus("WAITING FOR USER NAME...");
-            TxtInput.Focus();
+                // Step 2: Speak the name prompt AFTER the WAV has finished
+                if (Visuals_UI.VoiceEnabled)
+                    Visuals_UI.SpeakSync(
+                        "What is your name?");
+            });
+            greetingThread.IsBackground = true;
+            greetingThread.Start();
         }
 
         // ══════════════════════════════════════════════════════════════════════════
         //  Input handling
         // ══════════════════════════════════════════════════════════════════════════
 
-        /* Fires when the user presses a key in the input box.
-         * Enter submits the message; Escape clears the input field.
-         */
         private void TxtInput_KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key == Key.Enter && BtnSend.IsEnabled)
@@ -123,15 +119,11 @@ namespace PROG6221_POE_PART2_WPF
             }
         }
 
-        /* Enables / disables the Send button based on whether there is text in the box.
-         * Prevents sending empty messages without showing an error dialog.
-         */
         private void TxtInput_TextChanged(object sender, TextChangedEventArgs e)
         {
             BtnSend.IsEnabled = !string.IsNullOrWhiteSpace(TxtInput.Text) && !_isBotTyping;
         }
 
-        /* Called when the user clicks the SEND button. */
         private void BtnSend_Click(object sender, RoutedEventArgs e)
         {
             ProcessInput();
@@ -141,11 +133,6 @@ namespace PROG6221_POE_PART2_WPF
         //  Core input processing pipeline
         // ══════════════════════════════════════════════════════════════════════════
 
-        /* Central method: validates input, routes to the correct handler,
-         * and updates the UI and status bar.
-         * Generated with assistance from Anthropic (2026) Claude [AI assistant].
-         * Prompt: 'How to route user input through a state machine in a WPF chatbot', April 2026.
-         */
         private void ProcessInput()
         {
             string raw = TxtInput.Text.Trim();
@@ -154,10 +141,10 @@ namespace PROG6221_POE_PART2_WPF
             TxtInput.Clear();
             BtnSend.IsEnabled = false;
 
-            // ── Phase 1: Name capture ─────────────────────────────────────────────
+            // ── Phase 1: Name capture and validation ──────────────────────────────
             if (!_nameEntered)
             {
-                _ = HandleNameInputAsync(raw);
+                HandleNameInput(raw);
                 return;
             }
 
@@ -175,13 +162,13 @@ namespace PROG6221_POE_PART2_WPF
             if (lower == "help" || lower == "menu")
             {
                 AppendSystemMessage(Visuals_UI.GetHelpMenuText());
-                if (_voiceEnabled) Visuals_UI.SpeakAsync("Here is the help menu.");
+                if (Visuals_UI.VoiceEnabled) Visuals_UI.SpeakAsync("Here is the help menu.");
                 SetStatus("HELP MENU DISPLAYED.");
                 return;
             }
             if (lower == "clear")
             {
-                ClearChatSession();
+                BtnClearChat_Click(null, null);
                 return;
             }
 
@@ -189,69 +176,108 @@ namespace PROG6221_POE_PART2_WPF
             _isBotTyping = true;
             SetStatus("BOT IS THINKING...");
 
-            // Run response generation on a background thread to keep UI responsive
-            // then marshal the result back to the UI thread via Dispatcher.
-            // Generated with assistance from Anthropic (2026) Claude [AI assistant].
-            // Prompt: 'How to use Dispatcher.Invoke to update WPF UI from a background thread', April 2026.
             Thread workerThread = new Thread(() =>
             {
                 string response = Cyber_Quiz.GetResponse(raw);
 
-                _ = Dispatcher.InvokeAsync(async () => await HandleBotResponseAsync(response));
+                Dispatcher.Invoke(() =>
+                {
+                    if (response == "THANK_YOU_EXIT")
+                    {
+                        AppendBotMessage(
+                            $"YOU'RE WELCOME, {Visuals_UI.UserName}! STAY SAFE ONLINE!\n" +
+                            "THE SESSION WILL NOW END. GOODBYE!");
+                        if (Visuals_UI.VoiceEnabled)
+                            Visuals_UI.SpeakSync(
+                                $"You're welcome, {Visuals_UI.UserName}. Stay safe online. Goodbye!");
+                        SetStatus("SESSION ENDED.");
+                        Task.Delay(2000).ContinueWith(_ =>
+                            Dispatcher.Invoke(() => Application.Current.Shutdown()));
+                        return;
+                    }
+
+                    AppendBotMessage(response);
+                    if (Visuals_UI.VoiceEnabled) Visuals_UI.SpeakAsync(response);
+                    UpdateTopicHistoryBar(); 
+                    string lastTopic = string.IsNullOrEmpty(Cyber_Quiz.LastTopic) ? "NONE" : Cyber_Quiz.LastTopic.ToUpper();
+                    SetStatus($"LAST TOPIC: {lastTopic}");
+                    _isBotTyping = false;
+                    BtnSend.IsEnabled = !string.IsNullOrWhiteSpace(TxtInput.Text);
+                    TxtInput.Focus();
+                });
             });
             workerThread.IsBackground = true;
             workerThread.Start();
         }
 
-        private async Task HandleBotResponseAsync(string response)
+        // ══════════════════════════════════════════════════════════════════════════
+        //  Name validation
+        //  Rules:
+        //    - Must not be blank or whitespace only
+        //    - Must not be a pure number (e.g. "123", "42")
+        //    - Must not contain only digits and symbols
+        //    - Must contain at least one letter character
+        //
+        //  Fix: after validation passes, the bot speaks the welcome message.
+        // ══════════════════════════════════════════════════════════════════════════
+
+        /* Validates and stores the user's name.
+         * Rejects entries that are purely numeric or contain no alphabetic characters.
+         * Part 2 requirement: validate input types appropriately.
+         * Generated with assistance from Anthropic (2026) Claude [AI assistant].
+         * Prompt: 'How to validate that a string contains at least one letter in C#', April 2026.
+         */
+        private void HandleNameInput(string raw)
         {
-            // Special sentinel: "thank you" exits after showing goodbye
-            if (response == "THANK_YOU_EXIT")
+            // Validation 1: empty or whitespace (already prevented by BtnSend.IsEnabled, but double-check)
+            if (string.IsNullOrWhiteSpace(raw))
             {
-                string goodbyeMessage =
-                    $"YOU'RE WELCOME, {Visuals_UI.UserName}! STAY SAFE ONLINE!\n" +
-                    "THE SESSION WILL NOW END. GOODBYE!";
-                await RenderBotOutputAsync(
-                    goodbyeMessage,
-                    $"You're welcome, {Visuals_UI.UserName}. Stay safe online. Goodbye!");
-                SetStatus("SESSION ENDED.");
-                await Task.Delay(2000);
-                Application.Current.Shutdown();
+                AppendErrorMessage("PLEASE ENTER YOUR NAME TO CONTINUE.");
+                if (Visuals_UI.VoiceEnabled)
+                    Visuals_UI.SpeakAsync("Please enter your name to continue.");
                 return;
             }
 
-            await RenderBotOutputAsync(response, response);
-            UpdateTopicHistoryBar();
-            SetStatus($"LAST TOPIC: {GetLastTopicLabel()}");
-            _isBotTyping = false;
-            BtnSend.IsEnabled = !string.IsNullOrWhiteSpace(TxtInput.Text);
-            TxtInput.Focus();
-        }
-
-        // ══════════════════════════════════════════════════════════════════════════
-        //  Greeting / name flow
-        // ══════════════════════════════════════════════════════════════════════════
-
-        private async Task HandleNameInputAsync(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name))
+            // Validation 2: must contain at least one letter — rejects pure numbers like "123" or "42"
+            if (!Regex.IsMatch(raw, @"[a-zA-Z]"))
             {
-                AppendErrorMessage("PLEASE ENTER A VALID NAME TO CONTINUE.");
-                if (_voiceEnabled) Visuals_UI.SpeakAsync("Please enter a valid name.");
+                AppendErrorMessage(
+                    "INVALID NAME: PLEASE ENTER A NAME CONTAINING LETTERS.\n" +
+                    "NUMBERS AND SYMBOLS ALONE ARE NOT ACCEPTED AS A NAME.\n\n" +
+                    "EXAMPLE: 'Alice', 'John', 'CyberUser'");
+                if (Visuals_UI.VoiceEnabled)
+                    Visuals_UI.SpeakAsync(
+                        "Invalid name. Please enter a name that contains letters.");
+                TxtInput.Focus();
                 return;
             }
 
-            // Store name in both Visuals_UI (for display prefix) and Memory (for personalisation)
-            Visuals_UI.UserName = name.ToUpper();
-            Memory.Set("name", name.ToUpper());
+            // Validation 3: reasonable length — at least 2 characters
+            if (raw.Trim().Length < 2)
+            {
+                AppendErrorMessage(
+                    "THAT NAME IS TOO SHORT.\n" +
+                    "PLEASE ENTER AT LEAST 2 CHARACTERS.");
+                if (Visuals_UI.VoiceEnabled)
+                    Visuals_UI.SpeakAsync("That name is too short. Please enter at least 2 characters.");
+                TxtInput.Focus();
+                return;
+            }
+
+            // ── Name is valid — store and proceed ──────────────────────────────────
+            // Extract only the first word as the display name (e.g. "Alice Smith" → "ALICE")
+            string firstName = raw.Trim().Split(' ')[0];
+            firstName = char.ToUpper(firstName[0]) + firstName.Substring(1).ToLower();
+
+            Visuals_UI.UserName = firstName.ToUpper();
+            Memory.Set("name", firstName.ToUpper());
             _nameEntered = true;
 
-            // Update the prompt label to show the user's name
+            // Update the input prompt label
             TxtPromptLabel.Text = $"[ {Visuals_UI.UserName} ] ▶ ";
 
-            AppendUserMessage(name);
-            _isBotTyping = true;
-            BtnSend.IsEnabled = false;
+            // Show the user's input in chat
+            AppendUserMessage(raw);
 
             string welcome =
                 $"HELLO, {Visuals_UI.UserName}!\n" +
@@ -259,16 +285,15 @@ namespace PROG6221_POE_PART2_WPF
                 "I'M HERE TO HELP YOU STAY SAFE ONLINE.\n" +
                 "TYPE 'help' OR 'menu' TO SEE WHAT YOU CAN ASK ME.";
 
-            await RenderBotOutputAsync(
-                welcome,
-                $"Hello, {name}! Welcome to the Cybersecurity Awareness Chat Bot! I'm here to help you stay safe online. Type 'help' or 'menu' to see what you can ask me.");
-
-            // Show the help menu automatically after greeting, just like Part 1
+            AppendBotMessage(welcome);
             AppendSystemMessage(Visuals_UI.GetHelpMenuText());
             SetStatus($"SESSION ACTIVE  ●  USER: {Visuals_UI.UserName}");
-            _isBotTyping = false;
+
+            // Speak the welcome message AFTER validation — fix for sequential audio
+            if (Visuals_UI.VoiceEnabled)
+                Visuals_UI.SpeakAsync($"Hello, {firstName}! Welcome to the Cybersecurity Awareness Chat Bot!");
+
             TxtInput.Focus();
-            BtnSend.IsEnabled = !string.IsNullOrWhiteSpace(TxtInput.Text);
         }
 
         // ══════════════════════════════════════════════════════════════════════════
@@ -281,86 +306,73 @@ namespace PROG6221_POE_PART2_WPF
                 $"THANK YOU FOR USING THE CYBERSECURITY AWARENESS CHAT BOT, {Visuals_UI.UserName}!\n" +
                 "STAY SAFE ONLINE! GOODBYE!");
 
-            if (_voiceEnabled)
+            if (Visuals_UI.VoiceEnabled)
                 Visuals_UI.SpeakSync(
-                    $"Thank you for using the Cybersecurity Awareness Chat Bot, {Visuals_UI.UserName}. Stay safe online. Goodbye!");
+                    $"Thank you for using the Cybersecurity Awareness Chat Bot, {Visuals_UI.UserName}. " +
+                    "Stay safe online. Goodbye!");
 
             SetStatus("SHUTTING DOWN...");
-            System.Threading.Tasks.Task.Delay(1500)
-                .ContinueWith(_ => Dispatcher.Invoke(() => Application.Current.Shutdown()));
+            Task.Delay(1500).ContinueWith(_ =>
+                Dispatcher.Invoke(() => Application.Current.Shutdown()));
         }
 
         // ══════════════════════════════════════════════════════════════════════════
         //  Message rendering helpers
-        //  Each method appends a styled Border+TextBlock bubble to ChatPanel.
         // ══════════════════════════════════════════════════════════════════════════
 
-        /* Appends a bot message bubble — cyan text, left-anchored.
-         * Code completion assisted by Visual Studio's IntelliCode (Microsoft Corporation, 2022). Version 17.8.
-         */
         private void AppendBotMessage(string text)
         {
-            AppendMessage("BOT", text, BotColour, new SolidColorBrush(Color.FromRgb(0, 20, 30)),
-                          new SolidColorBrush(Color.FromRgb(0, 40, 55)), HorizontalAlignment.Left);
+            AppendMessage("BOT", text,
+                BotColour,
+                new SolidColorBrush(Color.FromRgb(0, 20, 30)),
+                new SolidColorBrush(Color.FromRgb(0, 40, 55)),
+                HorizontalAlignment.Left);
             ScrollToBottom();
         }
 
-        private async Task AppendBotMessageWithTypingAsync(string text)
-        {
-            TextBlock body = AppendMessage("BOT", string.Empty, BotColour, new SolidColorBrush(Color.FromRgb(0, 20, 30)),
-                                           new SolidColorBrush(Color.FromRgb(0, 40, 55)), HorizontalAlignment.Left);
-            await TypeTextAsync(body, text);
-            ScrollToBottom();
-        }
-
-        private async Task RenderBotOutputAsync(string displayText, string speechText)
-        {
-            // Start TTS first, then immediately render typed text so both channels run together.
-            if (_voiceEnabled && !string.IsNullOrWhiteSpace(speechText))
-                _speakBotDelegate(speechText);
-
-            await _renderBotMessageDelegate(displayText);
-        }
-
-        /* Appends a user message bubble — yellow text, right-anchored. */
         private void AppendUserMessage(string text)
         {
             string label = _nameEntered ? Visuals_UI.UserName : "USER";
-            AppendMessage(label, text, UserColour, new SolidColorBrush(Color.FromRgb(30, 25, 0)),
-                          new SolidColorBrush(Color.FromRgb(50, 40, 0)), HorizontalAlignment.Right);
+            AppendMessage(label, text,
+                UserColour,
+                new SolidColorBrush(Color.FromRgb(30, 25, 0)),
+                new SolidColorBrush(Color.FromRgb(50, 40, 0)),
+                HorizontalAlignment.Right);
             ScrollToBottom();
         }
 
-        /* Appends a system/info message — green text, centred (used for help menu). */
         private void AppendSystemMessage(string text)
         {
-            AppendMessage("SYSTEM", text, SystemColour, new SolidColorBrush(Color.FromRgb(0, 15, 0)),
-                          new SolidColorBrush(Color.FromRgb(0, 30, 0)), HorizontalAlignment.Stretch);
+            AppendMessage("SYSTEM", text,
+                SystemColour,
+                new SolidColorBrush(Color.FromRgb(0, 15, 0)),
+                new SolidColorBrush(Color.FromRgb(0, 30, 0)),
+                HorizontalAlignment.Stretch);
             ScrollToBottom();
         }
 
-        /* Appends a red error message bubble. */
         private void AppendErrorMessage(string text)
         {
-            AppendMessage("ERROR", text, ErrorColour, new SolidColorBrush(Color.FromRgb(30, 0, 0)),
-                          new SolidColorBrush(Color.FromRgb(60, 0, 0)), HorizontalAlignment.Left);
+            AppendMessage("ERROR", text,
+                ErrorColour,
+                new SolidColorBrush(Color.FromRgb(30, 0, 0)),
+                new SolidColorBrush(Color.FromRgb(60, 0, 0)),
+                HorizontalAlignment.Left);
             ScrollToBottom();
         }
 
-        /* Core rendering method — builds a styled message block and appends it to ChatPanel.
+        /* Core rendering method — builds a styled message bubble and adds it to ChatPanel.
          * Generated with assistance from Anthropic (2026) Claude [AI assistant].
          * Prompt: 'How to dynamically add styled TextBlock elements to a WPF StackPanel in C#', April 2026.
          */
-        private TextBlock AppendMessage(string senderLabel, string text,
-                                        SolidColorBrush textColor,
-                                        SolidColorBrush bgColor,
-                                        SolidColorBrush borderColor,
-                                        HorizontalAlignment alignment)
+        private void AppendMessage(string senderLabel, string text,
+                                   SolidColorBrush textColor,
+                                   SolidColorBrush bgColor,
+                                   SolidColorBrush borderColor,
+                                   HorizontalAlignment alignment)
         {
-            // Timestamp
             string timestamp = DateTime.Now.ToString("HH:mm:ss");
 
-            // Outer container
             Border bubble = new Border
             {
                 Background = bgColor,
@@ -375,7 +387,7 @@ namespace PROG6221_POE_PART2_WPF
 
             StackPanel inner = new StackPanel();
 
-            // Header row: sender label + timestamp
+            // Header: sender label + timestamp
             Grid header = new Grid();
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -405,7 +417,7 @@ namespace PROG6221_POE_PART2_WPF
             header.Children.Add(lblTime);
             inner.Children.Add(header);
 
-            // Thin divider line
+            // Divider line
             inner.Children.Add(new Border
             {
                 BorderBrush = borderColor,
@@ -427,46 +439,18 @@ namespace PROG6221_POE_PART2_WPF
 
             bubble.Child = inner;
 
-            // Fade-in animation for new messages
+            // Fade-in animation
             bubble.Opacity = 0;
             ChatPanel.Children.Add(bubble);
-
             DoubleAnimation fadeIn = new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(200)));
             bubble.BeginAnimation(UIElement.OpacityProperty, fadeIn);
-            return body;
-        }
-
-        private async Task TypeTextAsync(TextBlock target, string fullText)
-        {
-            target.Text = string.Empty;
-            foreach (char c in fullText)
-            {
-                target.Text += c;
-                ScrollToBottom();
-                await Task.Delay(GetDelayForCharacter(c));
-            }
-        }
-
-        private static int GetDelayForCharacter(char c)
-        {
-            if (c == '.' || c == '!' || c == '?') return 110;
-            if (c == ',' || c == ';' || c == ':') return 70;
-            if (c == '\n') return 120;
-            if (char.IsWhiteSpace(c)) return 8;
-            return BaseTypingDelayMs;
         }
 
         // ══════════════════════════════════════════════════════════════════════════
         //  Button event handlers
         // ══════════════════════════════════════════════════════════════════════════
 
-        /* Clears the chat panel and resets Memory for a fresh session. */
         private void BtnClearChat_Click(object sender, RoutedEventArgs e)
-        {
-            ClearChatSession();
-        }
-
-        private void ClearChatSession()
         {
             ChatPanel.Children.Clear();
             Memory.Clear();
@@ -476,13 +460,12 @@ namespace PROG6221_POE_PART2_WPF
             TxtInput.Focus();
         }
 
-        /* Toggles the text-to-speech voice on or off. */
         private void BtnMute_Click(object sender, RoutedEventArgs e)
         {
-            _voiceEnabled = !_voiceEnabled;
-            BtnMute.Content = _voiceEnabled ? "[ VOICE: ON ]" : "[ VOICE: OFF ]";
-            if (!_voiceEnabled) Visuals_UI.StopSpeech();
-            SetStatus(_voiceEnabled ? "VOICE ENABLED." : "VOICE DISABLED.");
+            Visuals_UI.VoiceEnabled = !Visuals_UI.VoiceEnabled;
+            BtnMute.Content = Visuals_UI.VoiceEnabled ? "[ VOICE: ON ]" : "[ VOICE: OFF ]";
+            if (!Visuals_UI.VoiceEnabled) Visuals_UI.StopSpeech();
+            SetStatus(Visuals_UI.VoiceEnabled ? "VOICE ENABLED." : "VOICE DISABLED.");
         }
 
         // ══════════════════════════════════════════════════════════════════════════
@@ -501,20 +484,12 @@ namespace PROG6221_POE_PART2_WPF
                 TxtTopicHistory.Text = "TOPICS: " + string.Join("  ●  ", history).ToUpper();
         }
 
-        private string GetLastTopicLabel()
-        {
-            return !string.IsNullOrEmpty(Cyber_Quiz.LastTopic)
-                ? Cyber_Quiz.LastTopic.ToUpper()
-                : "NONE";
-        }
-
         // ══════════════════════════════════════════════════════════════════════════
         //  Scroll helper
         // ══════════════════════════════════════════════════════════════════════════
 
         private void ScrollToBottom()
         {
-            // Defer scroll until the layout has updated so the new item is measured
             Dispatcher.BeginInvoke(new Action(() =>
             {
                 ChatScrollViewer.ScrollToBottom();
@@ -529,10 +504,7 @@ namespace PROG6221_POE_PART2_WPF
  *
  * Anthropic (2026) Claude [AI assistant]. Available at: https://www.anthropic.com (Accessed: April 2026).
  * Prompt: 'How to build a WPF chat window with colour-coded message bubbles in C#'.
- * Prompt: 'How to use Dispatcher.Invoke to update WPF UI from a background thread'.
+ * Prompt: 'How to validate that a string contains at least one letter in C#'.
+ * Prompt: 'How to play a wav file then run TTS sequentially on a background thread in WPF'.
  * Prompt: 'How to dynamically add styled TextBlock elements to a WPF StackPanel in C#'.
- * Prompt: 'How to route user input through a state machine in a WPF chatbot'.
- *
- * OpenAI (2026) ChatGPT [AI assistant]. Available at: https://chat.openai.com (Accessed: 24 April 2026).
- * Prompt: 'How to coordinate WPF typing animation with text-to-speech and implement delegate-based message rendering'.
  */

@@ -72,11 +72,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\sunga\\source\\repos\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF.csproj",
+      "projectUniqueName": "D:\\GitHub-Personal\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF.csproj",
       "projectName": "PROG6221_POE_PART2-WPF",
-      "projectPath": "C:\\Users\\sunga\\source\\repos\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF.csproj",
+      "projectPath": "D:\\GitHub-Personal\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF.csproj",
       "packagesPath": "C:\\Users\\sunga\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\sunga\\source\\repos\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF\\obj\\",
+      "outputPath": "D:\\GitHub-Personal\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"

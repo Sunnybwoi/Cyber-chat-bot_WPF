@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PROG6221_POE_PART2-WPF")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f4024d4c94420ce1e9d0675ecd7b12edfddec4fe")]
 [assembly: System.Reflection.AssemblyProductAttribute("PROG6221_POE_PART2-WPF")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PROG6221_POE_PART2-WPF")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

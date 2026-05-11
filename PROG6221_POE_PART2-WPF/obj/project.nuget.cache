@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "+bQVWBfpd5k=",
+  "dgSpecHash": "zr7Dm8RcCo8=",
   "success": true,
-  "projectFilePath": "C:\\Users\\sunga\\source\\repos\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF.csproj",
+  "projectFilePath": "D:\\GitHub-Personal\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF\\PROG6221_POE_PART2-WPF.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\sunga\\.nuget\\packages\\system.speech\\10.0.7\\system.speech.10.0.7.nupkg.sha512"
   ],

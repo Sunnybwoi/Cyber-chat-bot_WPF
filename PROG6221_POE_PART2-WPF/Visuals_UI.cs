@@ -1,23 +1,27 @@
 ﻿using System;
 using System.Speech.Synthesis;
 using System.Threading;
-using System.Windows.Media;
 
 namespace PROG6221_POE_PART2_WPF
 {
     /* Visuals_UI provides shared application-wide state (UserName, Synthesizer) and
-     * audio helpers that are consumed by both ChatWindow and Cyber_Quiz.
+     * audio helpers consumed by both ChatWindow and Cyber_Quiz.
      * All console-specific rendering from Part 1 has been removed; the GUI handles
      * visual output directly via ChatWindow.AppendMessage().
      * Code completion assisted by Visual Studio's IntelliCode (Microsoft Corporation, 2022). Version 17.8.
      */
     public static class Visuals_UI
     {
-        // Shared speech synthesizer — one instance for the lifetime of the app
+        // ── Automatic properties ──────────────────────────────────────────────────
+
+        /// <summary>Shared speech synthesizer — one instance for the app lifetime.</summary>
         public static SpeechSynthesizer Synthesizer { get; } = new SpeechSynthesizer();
 
-        // The current user's display name, set after the greeting prompt
+        /// <summary>The current user's display name, set after the greeting prompt.</summary>
         public static string UserName { get; set; } = "USER";
+
+        /// <summary>Whether voice / TTS is currently enabled.</summary>
+        public static bool VoiceEnabled { get; set; } = true;
 
         // ── Static constructor: configure synthesizer defaults once ──────────────
         static Visuals_UI()
@@ -32,21 +36,22 @@ namespace PROG6221_POE_PART2_WPF
         /* Speaks the supplied text asynchronously on a background thread.
          * Any currently-playing speech is cancelled first to avoid overlap.
          * Generated with assistance from Anthropic (2026) Claude [AI assistant].
-         * Prompt: 'How to achieve synchronisation between text output and TTS in C#', 24 March.
+         * Prompt: 'How to achieve synchronisation between text output and TTS in C#', March 2026.
          */
         public static void SpeakAsync(string text)
         {
-            Synthesizer.SpeakAsyncCancelAll();
-            // Run on background thread — does NOT block the UI dispatcher
+            if (!VoiceEnabled) return;
+
             Thread speechThread = new Thread(() =>
             {
                 try
                 {
+                    Synthesizer.SpeakAsyncCancelAll();
                     Synthesizer.Speak(text.Replace("\n", " "));
                 }
                 catch (OperationCanceledException)
                 {
-                    // Speech was intentionally cancelled by SpeakAsyncCancelAll() — safe to ignore
+                    // Intentional cancellation from SpeakAsyncCancelAll() — safe to ignore
                 }
                 catch (Exception)
                 {
@@ -62,6 +67,7 @@ namespace PROG6221_POE_PART2_WPF
          */
         public static void SpeakSync(string text)
         {
+            if (!VoiceEnabled) return;
             try
             {
                 Synthesizer.SpeakAsyncCancelAll();
@@ -74,14 +80,14 @@ namespace PROG6221_POE_PART2_WPF
         /// <summary>Stops any currently playing speech immediately.</summary>
         public static void StopSpeech()
         {
-            Synthesizer.SpeakAsyncCancelAll();
+            try { Synthesizer.SpeakAsyncCancelAll(); }
+            catch (Exception) { }
         }
 
-        // ── ASCII art (retained as a plain string for display in the GUI) ────────
+        // ── ASCII art ────────────────────────────────────────────────────────────
 
-        /* Returns the same ASCII banner used in Part 1 as a multi-line string.
+        /* Returns the ASCII banner from Part 1 as a multi-line string.
          * ChatWindow renders this inside a styled TextBlock with a monospace font.
-         * Code completion assisted by Visual Studio's IntelliCode (Microsoft Corporation, 2022). Version 17.8.
          */
         public static string GetASCIIBanner()
         {
@@ -97,11 +103,8 @@ namespace PROG6221_POE_PART2_WPF
                 @"              \___|_||_/_/ \_\_|   |___/\___/ |_|                  ";
         }
 
-        // ── Help menu text ────────────────────────────────────────────────────────
+        // ── Help menu ────────────────────────────────────────────────────────────
 
-        /* Returns the help menu as a plain string for display in the chat window.
-         * Updated to include all Part 2 topics.
-         */
         public static string GetHelpMenuText()
         {
             return
@@ -118,6 +121,7 @@ namespace PROG6221_POE_PART2_WPF
                 "╠══════════════════════════════════════════════════════════╣\n" +
                 "║  GENERAL:                                                ║\n" +
                 "║    how are you / what can you do / your purpose          ║\n" +
+                "║    what is your name / what is the time / what is date   ║\n" +
                 "║    tell me more / another tip / explain more             ║\n" +
                 "╠══════════════════════════════════════════════════════════╣\n" +
                 "║  COMMANDS:                                               ║\n" +
